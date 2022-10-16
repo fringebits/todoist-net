@@ -1,7 +1,9 @@
-using System;
 
 namespace Todoist.Net.Models
 {
+    using System;
+    using Newtonsoft.Json;
+
     /// <summary>
     /// Struct that represents an identifier of Todoist entities. Can be <see cref="System.Int32"/> if it's persistent or <see cref="Guid"/> if it's temporary.
     /// </summary>
@@ -11,6 +13,7 @@ namespace Todoist.Net.Models
         /// Initializes a new instance of the <see cref="ComplexId"/> struct.
         /// </summary>
         /// <param name="persistentId">The persistent identifier.</param>
+        [JsonConstructor]
         public ComplexId(string persistentId)
             : this()
         {
@@ -31,7 +34,7 @@ namespace Todoist.Net.Models
         /// Gets the persistent identifier.
         /// </summary>
         /// <value>The persistent identifier.</value>
-        public string PersistentId { get; }
+        public string PersistentId { get; private set; }
 
         /// <summary>
         /// Gets the temporary identifier.

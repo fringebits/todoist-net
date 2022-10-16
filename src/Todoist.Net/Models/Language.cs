@@ -1,5 +1,7 @@
-﻿namespace Todoist.Net.Models
+namespace Todoist.Net.Models
 {
+    using Newtonsoft.Json;
+
     /// <summary>
     /// Represents a language type.
     /// </summary>
@@ -10,6 +12,7 @@
         /// Initializes a new instance of the <see cref="Language" /> class.
         /// </summary>
         /// <param name="value">The value.</param>
+        [JsonConstructor]
         private Language(string value)
             : base(value)
         {
