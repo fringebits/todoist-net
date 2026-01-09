@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading.Tasks;
 
 using Todoist.Net.Models;
 using Todoist.Net.Tests.Extensions;
@@ -21,88 +22,121 @@ namespace Todoist.Net.Tests.Services
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void CreateGetAndDelete_Success()
+        public async Task CreateGetAndDelete_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
             var projectName = Guid.NewGuid().ToString();
-            client.Projects.AddAsync(new Project(projectName)).Wait();
+            var projectId = await client.Projects.AddAsync(new Project(projectName));
+            try
+            {
+                var projects = await client.Projects.GetAsync();
 
-            var projects = client.Projects.GetAsync().Result;
-            var project = projects.FirstOrDefault(p => p.Name == projectName);
+                Assert.Contains(projects, p => p.Name == projectName);
+            }
+            finally
+            {
+                await client.Projects.DeleteAsync(projectId);
+            }
+            var otherProjects = await client.Projects.GetAsync();
 
-            Assert.True(project != null);
-
-            client.Projects.DeleteAsync(project.Id).Wait();
-
-            projects = client.Projects.GetAsync().Result;
-            project = projects.FirstOrDefault(p => p.Name == projectName);
-
-            Assert.True(project == null);
+            Assert.DoesNotContain(otherProjects, p => p.Name == projectName);
         }
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void CreateUpdateOrderMoveAndDelete_Success()
+        public async Task CreateUpdateOrderMoveAndDelete_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
             var projectName = Guid.NewGuid().ToString();
-            var project = new Project(projectName);            
-            client.Projects.AddAsync(project).Wait();
+            var project = new Project(projectName);
+            await client.Projects.AddAsync(project);
+            try
+            {
+                Assert.True(project.Id != default(string));
 
-            Assert.True(project.Id != default(string));
+                project.Name = "u_" + Guid.NewGuid();
 
-            project.Name = "u_" + Guid.NewGuid();
+                await client.Projects.UpdateAsync(project);
 
-            client.Projects.UpdateAsync(project).Wait();
+                await client.Projects.ReorderAsync(new ReorderEntry(project.Id, 1));
 
-            client.Projects.ReorderAsync(new ReorderEntry(project.Id, 1)).Wait();
-            client.Projects.MoveAsync(new MoveArgument(project.Id, null)).Wait();
-
-            client.Projects.DeleteAsync(project.Id).Wait();
+                var parentProjectName = Guid.NewGuid().ToString();
+                var parentProject = new Project(parentProjectName);
+                await client.Projects.AddAsync(parentProject);
+                try
+                {
+                    await client.Projects.MoveAsync(new MoveArgument(project.Id, parentProject.Id));
+                }
+                finally
+                {
+                    await client.Projects.DeleteAsync(parentProject.Id);
+                }
+            }
+            finally
+            {
+                try
+                {
+                    await client.Projects.DeleteAsync(project.Id);
+                }
+                // Parent project removes child projects too
+                // So the project may be deleted already
+                catch
+                {
+                    // ignored
+                }
+            }
         }
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void CreateArchiveAndDelete_Success()
+        public async Task CreateArchiveAndDelete_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
             var projectName = Guid.NewGuid().ToString();
             var newProject = new Project(projectName);
-            client.Projects.AddAsync(newProject).Wait();
+            await client.Projects.AddAsync(newProject);
+            try
+            {
+                await client.Projects.ArchiveAsync(newProject.Id);
+                var projectInfo = await client.Projects.GetAsync(newProject.Id);
+                Assert.True(projectInfo.Project.IsArchived);
 
-            client.Projects.ArchiveAsync(newProject.Id).Wait();
-            var projectInfo = client.Projects.GetAsync(newProject.Id).Result;
-            Assert.True(projectInfo.Project.IsArchived);
 
-
-            client.Projects.UnarchiveAsync(newProject.Id).Wait();
-            projectInfo = client.Projects.GetAsync(newProject.Id).Result;
-            Assert.False(projectInfo.Project.IsArchived);
-
-            client.Projects.DeleteAsync(projectInfo.Project.Id).Wait();
+                await client.Projects.UnarchiveAsync(newProject.Id);
+                projectInfo = await client.Projects.GetAsync(newProject.Id);
+                Assert.False(projectInfo.Project.IsArchived);
+            }
+            finally
+            {
+                await client.Projects.DeleteAsync(newProject.Id);
+            }
         }
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void CreateProjectAndGetProjectData_Success()
+        public async Task CreateProjectAndGetProjectData_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
             var transaction = client.CreateTransaction();
 
-            var projectId = transaction.Project.AddAsync(new Project("Test")).Result;
-            transaction.Items.AddAsync(new Item("Test task", projectId)).Wait();
+            var projectId = await transaction.Project.AddAsync(new Project("Test"));
+            await transaction.Items.AddAsync(new AddItem("Test task", projectId));
 
-            transaction.CommitAsync().Wait();
+            await transaction.CommitAsync();
+            try
+            {
+                var projectData = await client.Projects.GetDataAsync(projectId);
 
-            var projectData = client.Projects.GetDataAsync(projectId).Result;
-
-            Assert.Equal(1, projectData.Items.Count);
-
-            client.Projects.DeleteAsync(projectId).Wait();
+                Assert.Single(projectData.Items);
+            }
+            finally
+            {
+                await client.Projects.DeleteAsync(projectId);
+            }
         }
     }
 }

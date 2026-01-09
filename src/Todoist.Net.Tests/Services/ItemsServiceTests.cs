@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading.Tasks;
 
 using Todoist.Net.Exceptions;
 using Todoist.Net.Models;
@@ -22,180 +23,275 @@ namespace Todoist.Net.Tests.Services
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationPremiumTraitValue)]
-        public void CreateItemCompleteGetCloseAsync_Success()
+        public async Task CreateItemCompleteGetCloseAsync_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
             var transaction = client.CreateTransaction();
 
-            var item = new Item("temp task");
-            transaction.Items.AddAsync(item).Wait();
-            transaction.Notes.AddToItemAsync(new Note("test note"), item.Id).Wait();
-            transaction.Items.CloseAsync(item.Id).Wait();
+            var item = new AddItem("temp task");
+            await transaction.Items.AddAsync(item);
+            await transaction.Notes.AddToItemAsync(new Note("test note"), item.Id);
+            await transaction.Items.CloseAsync(item.Id);
 
-            transaction.CommitAsync().Wait();
+            await transaction.CommitAsync();
+            try
+            {
+                var completedTasks =
+                    await client.Items.GetCompletedAsync(
+                        new ItemFilter()
+                        {
+                            AnnotateItems = true,
+                            AnnotateNotes = true,
+                            Limit = 5,
+                            Since = DateTime.Today.AddDays(-1)
+                        });
 
-            var completedTasks =
-                client.Items.GetCompletedAsync(
-                    new ItemFilter() { AnnotateNotes = true, Limit = 5, Since = DateTime.Today.AddDays(-1) }).Result;
-
-            Assert.True(completedTasks.Items.Count > 0);
-
-            client.Items.DeleteAsync(item.Id).Wait();
+                Assert.True(completedTasks.Items.Count > 0);
+                Assert.All(completedTasks.Items, i => Assert.NotNull(i.ItemObject));
+            }
+            finally
+            {
+                await client.Items.DeleteAsync(item.Id);
+            }
         }
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void CreateItemCompleteUncompleteAsync_Success()
+        public async Task CreateItemCompleteUncompleteAsync_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
             var transaction = client.CreateTransaction();
 
-            var item = new Item("demo task");
-            var itemId = transaction.Items.AddAsync(item).Result;
-            transaction.Items.CompleteAsync(new CompleteItemArgument(itemId));
+            var item = new AddItem("demo task");
+            var itemId = await transaction.Items.AddAsync(item);
+            await transaction.Items.CompleteAsync(new CompleteItemArgument(itemId));
 
-            transaction.CommitAsync().Wait();
+            await transaction.CommitAsync();
+            try
+            {
+                var itemInfo = await client.Items.GetAsync(item.Id);
 
-            var itemInfo = client.Items.GetAsync(item.Id).Result;
+                Assert.True(itemInfo.Item.IsChecked);
 
-            Assert.True(itemInfo.Item.IsChecked == true);
+                await client.Items.UncompleteAsync(itemId);
 
-            client.Items.UncompleteAsync(itemId).Wait();
+                var anotherItem = (await client.Items.GetAsync()).First(i => i.Id != item.Id);
+                await client.Items.MoveAsync(ItemMoveArgument.CreateMoveToParent(item.Id, anotherItem.Id));
 
-            var anotherItem = client.Items.GetAsync().Result.First(i => i.Id != item.Id);
-            client.Items.MoveAsync(ItemMoveArgument.CreateMoveToParent(item.Id, anotherItem.Id))
-                .Wait();
+                itemInfo = await client.Items.GetAsync(item.Id);
+                Assert.Equal(anotherItem.Id.PersistentId, itemInfo.Item.ParentId);
 
-            itemInfo = client.Items.GetAsync(item.Id).Result;
-            Assert.Equal(anotherItem.Id.PersistentId, itemInfo.Item.ParentId);
+                await client.Items.CompleteAsync(new CompleteItemArgument(itemId));
+                itemInfo = await client.Items.GetAsync(item.Id);
+                Assert.True(itemInfo.Item.IsChecked);
 
-            client.Items.CompleteAsync(new CompleteItemArgument(itemId)).Wait();
-            itemInfo = client.Items.GetAsync(item.Id).Result;
-            Assert.True(itemInfo.Item.IsChecked);
-
-            client.Items.UncompleteAsync(itemId).Wait();
-            itemInfo = client.Items.GetAsync(item.Id).Result;
-            Assert.False(itemInfo.Item.IsChecked);
-
-            client.Items.DeleteAsync(item.Id).Wait();
+                await client.Items.UncompleteAsync(itemId);
+                itemInfo = await client.Items.GetAsync(item.Id);
+                Assert.False(itemInfo.Item.IsChecked);
+            }
+            finally
+            {
+                await client.Items.DeleteAsync(item.Id);
+            }
         }
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void CreateItemClearDueDateAndDelete_Success()
+        public async Task CreateItemClearDueDateAndDelete_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
-            var item = new Item("demo task") { DueDate = new DueDate("22 Dec 2021", null, Language.English) };
-            client.Items.AddAsync(item).Wait();
+            var item = new AddItem("demo task") { DueDate = DueDate.FromText("22 Dec 2021", Language.English) };
+            await client.Items.AddAsync(item);
+            try
+            {
+                var itemInfo = await client.Items.GetAsync(item.Id);
 
-            var itemInfo = client.Items.GetAsync(item.Id).Result;
+                Assert.True(itemInfo.Item.Content == item.Content);
+                Assert.Equal("2021-12-22", itemInfo.Item.DueDate.StringDate);
 
-            Assert.True(itemInfo.Item.Content == item.Content);
-            Assert.Equal("2021-12-22", itemInfo.Item.DueDate.StringDate);
+                itemInfo.Item.Unset(i => i.DueDate);
+                await client.Items.UpdateAsync(itemInfo.Item);
 
-            itemInfo.Item.DueDate = null;
-            client.Items.UpdateAsync(itemInfo.Item).Wait();
-
-            itemInfo = client.Items.GetAsync(item.Id).Result;
-            Assert.Null(itemInfo.Item.DueDate);
-
-            client.Items.DeleteAsync(item.Id).Wait();
+                itemInfo = await client.Items.GetAsync(item.Id);
+                Assert.Null(itemInfo.Item.DueDate);
+            }
+            finally
+            {
+                await client.Items.DeleteAsync(item.Id);
+            }
         }
 
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void CreateItem_InvalidPDueDate_ThrowsException()
+        public async Task CreateItem_InvalidPDueDate_ThrowsException()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
-            var item = new Item("bad task");
-            item.DueDate = new DueDate("Invalid date string");
+            var item = new AddItem("bad task")
+            {
+                DueDate = DueDate.FromText("Invalid date string")
+            };
 
-            var aggregateException = Assert.ThrowsAsync<AggregateException>(
+            var aggregateException = await Assert.ThrowsAsync<AggregateException>(
                 async () =>
                     {
                         await client.Items.AddAsync(item);
-                    }).Result;
+                    });
 
             Assert.IsType<TodoistException>(aggregateException.InnerExceptions.First());
         }
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void MoveItemsToProject_Success()
+        public async Task MoveItemsToProject_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
-            var item = new Item("demo task");
-            client.Items.AddAsync(item).Wait();
+            var addItem = new AddItem("demo task");
+            var itemId = await client.Items.AddAsync(addItem);
+            try
+            {
+                var updateItem = new UpdateItem(itemId) { DueDate = DueDate.FromText("every fri") };
+                await client.Items.UpdateAsync(updateItem);
 
-            item.DueDate = new DueDate("every fri");
-            client.Items.UpdateAsync(item).Wait();
+                var project = new Project(Guid.NewGuid().ToString());
+                await client.Projects.AddAsync(project);
+                try
+                {
+                    var itemInfo = await client.Items.GetAsync(itemId);
 
-            var project = new Project(Guid.NewGuid().ToString());
-            client.Projects.AddAsync(project);
+                    Assert.True(project.Id != itemInfo.Project.Id);
 
-            var itemInfo = client.Items.GetAsync(item.Id).Result;
+                    await client.Items.MoveAsync(ItemMoveArgument.CreateMoveToProject(itemInfo.Item.Id, project.Id));
+                    itemInfo = await client.Items.GetAsync(itemInfo.Item.Id);
 
-            Assert.True(project.Id != itemInfo.Project.Id);
-
-            client.Items.MoveAsync(ItemMoveArgument.CreateMoveToProject(itemInfo.Item.Id, project.Id)).Wait();
-            itemInfo = client.Items.GetAsync(itemInfo.Item.Id).Result;
-
-            Assert.True(project.Id == itemInfo.Project.Id);
-
-            client.Projects.DeleteAsync(project.Id).Wait();
-            client.Items.DeleteAsync(itemInfo.Item.Id).Wait();
+                    Assert.True(project.Id == itemInfo.Project.Id);
+                }
+                finally
+                {
+                    await client.Projects.DeleteAsync(project.Id);
+                }
+            }
+            finally
+            {
+                await client.Items.DeleteAsync(itemId);
+            }
         }
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void QuickAddAsync_Success()
+        public async Task QuickAddAsync_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
-            var item = client.Items.QuickAddAsync(new QuickAddItem("Demo task every fri")).Result;
+            var item = await client.Items.QuickAddAsync(new QuickAddItem("Demo task every fri"));
+            try
+            {
+                Assert.NotNull(item);
 
-            Assert.NotNull(item);
-
-            client.Items.CompleteRecurringAsync(new CompleteRecurringItemArgument(item.Id, new DueDate(DateTime.UtcNow.AddMonths(1)))).Wait();
-            client.Items.CompleteRecurringAsync(item.Id).Wait();
-
-            client.Items.DeleteAsync(item.Id).Wait();
+                await client.Items.CompleteRecurringAsync(new CompleteRecurringItemArgument(item.Id, DueDate.CreateFloating(DateTime.UtcNow.AddMonths(1))));
+                await client.Items.CompleteRecurringAsync(item.Id);
+            }
+            finally
+            {
+                await client.Items.DeleteAsync(item.Id);
+            }
         }
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void UpdateOrders_Success()
+        public async Task UpdateOrders_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
-            var item = client.Items.QuickAddAsync(new QuickAddItem("Demo task every fri")).Result;
-
-            var firstProject = client.Projects.GetAsync().Result.First();
-            client.Items.MoveAsync(ItemMoveArgument.CreateMoveToProject(item.Id, firstProject.Id)).Wait();
-            client.Items.UpdateDayOrdersAsync(new OrderEntry(item.Id, 2));
-
-            client.Items.DeleteAsync(item.Id).Wait();
+            var item = await client.Items.QuickAddAsync(new QuickAddItem("Demo task every fri"));
+            try
+            {
+                var firstProject = (await client.Projects.GetAsync()).First();
+                await client.Items.MoveAsync(ItemMoveArgument.CreateMoveToProject(item.Id, firstProject.Id));
+                await client.Items.UpdateDayOrdersAsync(new OrderEntry(item.Id, 2));
+            }
+            finally
+            {
+                await client.Items.DeleteAsync(item.Id);
+            }
         }
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
-        public void CreateNewItem_DueDateIsLocal_DueDateNotChanged()
+        public async Task CreateNewItem_DueDateIsLocal_DueDateNotChanged()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
-            var item = new Item("New task") { DueDate = new DueDate(DateTime.Now.AddYears(1).Date) };
-            var taskId = client.Items.AddAsync(item).Result;
+            var item = new AddItem("New task") { DueDate = DueDate.CreateFloating(DateTime.Now.AddYears(1).Date) };
+            var taskId = await client.Items.AddAsync(item);
+            try
+            {
+                var itemInfo = await client.Items.GetAsync(taskId);
 
-            var itemInfo = client.Items.GetAsync(taskId).Result;
+                Assert.Equal(item.DueDate.Date, itemInfo.Item.DueDate.Date);
+            }
+            finally
+            {
+                await client.Items.DeleteAsync(item.Id);
+            }
+        }
 
-            Assert.Equal(item.DueDate.Date, itemInfo.Item.DueDate.Date.Value.ToLocalTime());
+        [Fact]
+        [Trait(Constants.TraitName, Constants.IntegrationFreeTraitValue)]
+        public async Task CreateNewItem_DeadlineIsLocal_DeadlaneNotChanged()
+        {
+            var client = TodoistClientFactory.Create(_outputHelper);
 
-            client.Items.DeleteAsync(item.Id).Wait();
+            var item = new AddItem("New task") { Deadline = new Deadline(DateTime.Now.AddYears(1).Date) };
+            var taskId = await client.Items.AddAsync(item);
+            try
+            {
+                var itemInfo = await client.Items.GetAsync(taskId);
+
+                Assert.Equal(item.Deadline.Date, itemInfo.Item.Deadline.Date);
+            }
+            finally
+            {
+                await client.Items.DeleteAsync(item.Id);
+            }
+        }
+
+        [Fact]
+        [Trait(Constants.TraitName, Constants.IntegrationPremiumTraitValue)]
+        public async Task CreateItemClearDurationAndDelete_Success()
+        {
+            var client = TodoistClientFactory.Create(_outputHelper);
+
+            var item = new AddItem("duration task")
+            {
+                DueDate = DueDate.FromText("22 Dec 2021 at 9:15", Language.English),
+                Duration = new Duration(45, DurationUnit.Minute)
+            };
+            await client.Items.AddAsync(item);
+            try
+            {
+                var itemInfo = await client.Items.GetAsync(item.Id);
+
+                Assert.True(itemInfo.Item.Content == item.Content);
+                Assert.Equal("2021-12-22T09:15:00", itemInfo.Item.DueDate.StringDate);
+
+                Assert.Equal(item.Duration.Amount, itemInfo.Item.Duration.Amount);
+                Assert.Equal(item.Duration.Unit, itemInfo.Item.Duration.Unit);
+
+                itemInfo.Item.Unset(i => i.Duration);
+                await client.Items.UpdateAsync(itemInfo.Item);
+
+                itemInfo = await client.Items.GetAsync(item.Id);
+                Assert.Null(itemInfo.Item.Duration);
+            }
+            finally
+            {
+                await client.Items.DeleteAsync(item.Id);
+            }
         }
     }
 }

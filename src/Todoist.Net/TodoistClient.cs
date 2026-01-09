@@ -3,12 +3,15 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using System.Threading;
 using System.Threading.Tasks;
-
-using Newtonsoft.Json;
 
 using Todoist.Net.Exceptions;
 using Todoist.Net.Models;
+using Todoist.Net.Serialization.Converters;
 using Todoist.Net.Serialization.Resolvers;
 using Todoist.Net.Services;
 
@@ -21,16 +24,29 @@ namespace Todoist.Net
     /// <seealso cref="Todoist.Net.IAdvancedTodoistClient" />
     public sealed class TodoistClient : IDisposable, IAdvancedTodoistClient
     {
-        private static readonly JsonSerializerSettings SerializerSettings =
-            new JsonSerializerSettings
+        private static readonly JsonSerializerOptions _serializerOptions = new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            NumberHandling = JsonNumberHandling.AllowReadingFromString,
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver
+            {
+                Modifiers =
                 {
-                    NullValueHandling = NullValueHandling.Ignore,
-                    ContractResolver = new ConverterContractResolver()
-                };
+                    JsonResolverModifiers.SerializeInternalSetters,
+                    JsonResolverModifiers.FilterSerializationByType,
+                    JsonResolverModifiers.IncludeUnsetProperties
+                }
+            },
+            Converters =
+            {
+                new StringEnumTypeConverter(),
+                new ComplexIdConverter(),
+                new CommandResultConverter(),
+                new CommandArgumentConverter()
+            }
+        };
 
         private readonly ITodoistRestClient _restClient;
-
-        private readonly string _token;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="TodoistClient" /> class.
@@ -38,7 +54,7 @@ namespace Todoist.Net
         /// <param name="token">The token.</param>
         /// <exception cref="ArgumentException">Value cannot be null or empty - token</exception>
         public TodoistClient(string token)
-            : this(token, new TodoistRestClient())
+            : this(token, null)
         {
         }
 
@@ -49,25 +65,22 @@ namespace Todoist.Net
         /// <param name="proxy">The proxy.</param>
         /// <exception cref="ArgumentException">Value cannot be null or empty - token</exception>
         public TodoistClient(string token, IWebProxy proxy)
-            : this(token, new TodoistRestClient(proxy))
-        {
-        }
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="TodoistClient" /> class.
-        /// </summary>
-        /// <param name="token">The token.</param>
-        /// <param name="restClient">The rest client.</param>
-        /// <exception cref="System.ArgumentException">Value cannot be null or empty - token</exception>
-        public TodoistClient(string token, ITodoistRestClient restClient)
+            : this(new TodoistRestClient(token, proxy))
         {
             if (string.IsNullOrEmpty(token))
             {
                 throw new ArgumentException("Value cannot be null or empty.", nameof(token));
             }
+        }
 
-            _token = token;
-            _restClient = restClient;
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TodoistClient" /> class.
+        /// </summary>
+        /// <param name="restClient">The rest client.</param>
+        /// <exception cref="System.ArgumentException">Value cannot be null or empty - restClient</exception>
+        public TodoistClient(ITodoistRestClient restClient)
+        {
+            _restClient = restClient ?? throw new ArgumentNullException(nameof(restClient));
 
             Projects = new ProjectsService(this);
             Templates = new TemplateService(this);
@@ -86,10 +99,6 @@ namespace Todoist.Net
             Sections = new SectionService(this);
         }
 
-        internal TodoistClient(ITodoistRestClient restClient)
-        {
-            _restClient = restClient ?? throw new ArgumentNullException(nameof(restClient));
-        }
 
         /// <summary>
         /// Gets the activity service.
@@ -206,28 +215,21 @@ namespace Todoist.Net
             _restClient?.Dispose();
         }
 
-        /// <summary>
-        /// Gets the resources asynchronous.
-        /// </summary>
-        /// <param name="resourceTypes">The resource types.</param>
-        /// <returns>
-        /// All resources.
-        /// </returns>
-        /// <exception cref="ArgumentNullException"><paramref name="resourceTypes" /> is <see langword="null" /></exception>
-        /// <exception cref="HttpRequestException">API exception.</exception>
-        public Task<Resources> GetResourcesAsync(params ResourceType[] resourceTypes) => GetResourcesAsync("*", resourceTypes);
 
-        /// <summary>
-        /// Gets the resources asynchronous.
-        /// </summary>
-        /// <param name="syncToken">The sync token returned from todoist for increment sync</param>
-        /// <param name="resourceTypes">The resource types.</param>
-        /// <returns>
-        /// All resources.
-        /// </returns>
-        /// <exception cref="ArgumentNullException"><paramref name="resourceTypes" /> is <see langword="null" /></exception>
-        /// <exception cref="HttpRequestException">API exception.</exception>
-        public Task<Resources> GetResourcesAsync(string syncToken, params ResourceType[] resourceTypes)
+        /// <inheritdoc/>
+        public Task<Resources> GetResourcesAsync(params ResourceType[] resourceTypes) =>
+            GetResourcesAsync("*", resourceTypes);
+
+        /// <inheritdoc/>
+        public Task<Resources> GetResourcesAsync(CancellationToken cancellationToken, params ResourceType[] resourceTypes) =>
+            GetResourcesAsync("*", cancellationToken, resourceTypes);
+
+        /// <inheritdoc/>
+        public Task<Resources> GetResourcesAsync(string syncToken, params ResourceType[] resourceTypes) =>
+            GetResourcesAsync(syncToken, CancellationToken.None, resourceTypes);
+
+        /// <inheritdoc/>
+        public Task<Resources> GetResourcesAsync(string syncToken, CancellationToken cancellationToken, params ResourceType[] resourceTypes)
         {
             if (resourceTypes == null)
             {
@@ -244,40 +246,17 @@ namespace Todoist.Net
             parameters.AddLast(
                 new KeyValuePair<string, string>(
                     "resource_types",
-                    JsonConvert.SerializeObject(resourceTypes, SerializerSettings)));
+                    JsonSerializer.Serialize(resourceTypes, _serializerOptions)));
 
-            return ProcessSyncAsync<Resources>(parameters);
+            return ProcessSyncAsync<Resources>(parameters, cancellationToken);
         }
 
-        /// <summary>
-        /// Posts the asynchronous and returns a raw content.
-        /// </summary>
-        /// <typeparam name="T">The result type.</typeparam>
-        /// <param name="resource">The resource.</param>
-        /// <param name="parameters">The parameters.</param>
-        /// <param name="files">The files.</param>
-        /// <returns>
-        /// The result.
-        /// </returns>
-        /// <exception cref="HttpRequestException">API exception.</exception>
-        public Task<T> PostFormAsync<T>(
-            string resource,
-            ICollection<KeyValuePair<string, string>> parameters,
-            IEnumerable<ByteArrayContent> files)
-        {
-            return ProcessFormAsync<T>(resource, parameters, files);
-        }
+        /// <inheritdoc/>
+        Task<string> IAdvancedTodoistClient.ExecuteCommandsAsync(params Command[] commands) =>
+            ((IAdvancedTodoistClient)this).ExecuteCommandsAsync(CancellationToken.None, commands);
 
-        /// <summary>
-        /// Executes the commands asynchronous.
-        /// </summary>
-        /// <param name="commands">The commands.</param>
-        /// <returns>Returns <see cref="T:System.Threading.Tasks.Task" />.The task object representing the asynchronous operation.</returns>
-        /// <exception cref="System.ArgumentNullException">Value cannot be null - commands.</exception>
-        /// <exception cref="System.AggregateException">Command execution exception.</exception>
-        /// <exception cref="ArgumentException">Value cannot be an empty collection.</exception>
-        /// <exception cref="HttpRequestException">API exception.</exception>
-        async Task IAdvancedTodoistClient.ExecuteCommandsAsync(params Command[] commands)
+        /// <inheritdoc/>
+        async Task<string> IAdvancedTodoistClient.ExecuteCommandsAsync(CancellationToken cancellationToken, params Command[] commands)
         {
             if (commands == null)
             {
@@ -293,9 +272,9 @@ namespace Todoist.Net
             parameters.AddLast(
                 new KeyValuePair<string, string>(
                     "commands",
-                    JsonConvert.SerializeObject(commands, SerializerSettings)));
+                    JsonSerializer.Serialize(commands, _serializerOptions)));
 
-            var syncResponse = await ProcessSyncAsync<SyncResponse>(parameters)
+            var syncResponse = await ProcessSyncAsync<SyncResponse>(parameters, cancellationToken)
                                    .ConfigureAwait(false);
 
             ThrowIfErrors(syncResponse);
@@ -304,65 +283,54 @@ namespace Todoist.Net
             {
                 UpdateTempIds(commands, syncResponse.TempIdMappings);
             }
+
+            return syncResponse.SyncToken;
         }
 
-        /// <summary>
-        /// Posts the request asynchronous.
-        /// </summary>
-        /// <typeparam name="T">Type of the result.</typeparam>
-        /// <param name="resource">The resource.</param>
-        /// <param name="parameters">The parameters.</param>
-        /// <returns>
-        /// The result.
-        /// </returns>
-        /// <exception cref="HttpRequestException">API exception.</exception>
-        Task<T> IAdvancedTodoistClient.PostAsync<T>(
+
+        /// <inheritdoc/>
+        Task<T> IAdvancedTodoistClient.PostFormAsync<T>(
             string resource,
-            ICollection<KeyValuePair<string, string>> parameters)
+            ICollection<KeyValuePair<string, string>> parameters,
+            IEnumerable<UploadFile> files,
+            CancellationToken cancellationToken)
         {
-            return ((IAdvancedTodoistClient)this).ProcessPostAsync<T>(resource, parameters);
+            return ProcessFormAsync<T>(resource, parameters, files, cancellationToken);
         }
 
-        /// <summary>
-        /// Posts the asynchronous and returns a raw content.
-        /// </summary>
-        /// <param name="resource">The resource.</param>
-        /// <param name="parameters">The parameters.</param>
-        /// <returns>
-        /// The result.
-        /// </returns>
-        /// <exception cref="HttpRequestException">API exception.</exception>
-        Task<string> IAdvancedTodoistClient.PostRawAsync(
+        /// <inheritdoc/>
+        async Task<T> IAdvancedTodoistClient.GetAsync<T>(
             string resource,
-            ICollection<KeyValuePair<string, string>> parameters)
+            ICollection<KeyValuePair<string, string>> parameters,
+            CancellationToken cancellationToken)
         {
-            return ProcessRawPostAsync(resource, parameters);
-        }
+            var response = await _restClient.GetAsync(resource, parameters, cancellationToken)
+                                .ConfigureAwait(false);
 
-        /// <summary>
-        /// Processes the request asynchronous.
-        /// </summary>
-        /// <typeparam name="T">The type of the result.</typeparam>
-        /// <param name="resource">The resource.</param>
-        /// <param name="parameters">The parameters.</param>
-        /// <returns>
-        /// The result of the operation.
-        /// </returns>
-        /// <exception cref="HttpRequestException">API exception.</exception>
-        async Task<T> IAdvancedTodoistClient.ProcessPostAsync<T>(
-            string resource,
-            ICollection<KeyValuePair<string, string>> parameters)
-        {
-            var responseContent = await ProcessRawPostAsync(resource, parameters)
+            var responseContent = await ReadResponseAsync(response, cancellationToken)
                                       .ConfigureAwait(false);
 
             return DeserializeResponse<T>(responseContent);
         }
 
-        private T DeserializeResponse<T>(string responseContent)
+        /// <inheritdoc/>
+        Task<T> IAdvancedTodoistClient.PostAsync<T>(
+            string resource,
+            ICollection<KeyValuePair<string, string>> parameters,
+            CancellationToken cancellationToken)
         {
-            return JsonConvert.DeserializeObject<T>(responseContent, SerializerSettings);
+            return ProcessPostAsync<T>(resource, parameters, cancellationToken);
         }
+
+        /// <inheritdoc/>
+        Task<string> IAdvancedTodoistClient.PostRawAsync(
+            string resource,
+            ICollection<KeyValuePair<string, string>> parameters,
+            CancellationToken cancellationToken)
+        {
+            return ProcessRawPostAsync(resource, parameters, cancellationToken);
+        }
+
 
         /// <summary>
         /// Processes the form asynchronous.
@@ -370,19 +338,43 @@ namespace Todoist.Net
         /// <typeparam name="T">The type of the response.</typeparam>
         /// <param name="resource">The resource.</param>
         /// <param name="parameters">The parameters.</param>
-        /// <param name="files">The files.</param>
+        /// <param name="files">The files to upload.</param>
+        /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <exception cref="HttpRequestException">API exception.</exception>
         /// <returns>The response.</returns>
         private async Task<T> ProcessFormAsync<T>(
             string resource,
             ICollection<KeyValuePair<string, string>> parameters,
-            IEnumerable<ByteArrayContent> files)
+            IEnumerable<UploadFile> files,
+            CancellationToken cancellationToken)
         {
-            TryAddToken(parameters);
+            var response = await _restClient.PostFormAsync(resource, parameters, files, cancellationToken)
+                                    .ConfigureAwait(false);
 
-            var response = await _restClient.PostFormAsync(resource, parameters, files)
-                               .ConfigureAwait(false);
-            var responseContent = await ReadResponseAsync(response)
+            var responseContent = await ReadResponseAsync(response, cancellationToken)
+                                      .ConfigureAwait(false);
+
+            return DeserializeResponse<T>(responseContent);
+        }
+
+
+        /// <summary>
+        /// Processes the request asynchronous.
+        /// </summary>
+        /// <typeparam name="T">The type of the result.</typeparam>
+        /// <param name="resource">The resource.</param>
+        /// <param name="parameters">The parameters.</param>
+        /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
+        /// <returns>
+        /// The result of the operation.
+        /// </returns>
+        /// <exception cref="HttpRequestException">API exception.</exception>
+        private async Task<T> ProcessPostAsync<T>(
+            string resource,
+            ICollection<KeyValuePair<string, string>> parameters,
+            CancellationToken cancellationToken)
+        {
+            var responseContent = await ProcessRawPostAsync(resource, parameters, cancellationToken)
                                       .ConfigureAwait(false);
 
             return DeserializeResponse<T>(responseContent);
@@ -393,18 +385,18 @@ namespace Todoist.Net
         /// </summary>
         /// <param name="resource">The resource.</param>
         /// <param name="parameters">The parameters.</param>
+        /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <returns>The response content.</returns>
         /// <exception cref="HttpRequestException">API exception.</exception>
         private async Task<string> ProcessRawPostAsync(
             string resource,
-            ICollection<KeyValuePair<string, string>> parameters)
+            ICollection<KeyValuePair<string, string>> parameters,
+            CancellationToken cancellationToken)
         {
-            TryAddToken(parameters);
+            var response = await _restClient.PostAsync(resource, parameters, cancellationToken)
+                                .ConfigureAwait(false);
 
-            var response = await _restClient.PostAsync(resource, parameters)
-                               .ConfigureAwait(false);
-
-            var responseContent = await ReadResponseAsync(response)
+            var responseContent = await ReadResponseAsync(response, cancellationToken)
                                       .ConfigureAwait(false);
             return responseContent;
         }
@@ -414,23 +406,26 @@ namespace Todoist.Net
         /// </summary>
         /// <typeparam name="T">Type of the response.</typeparam>
         /// <param name="parameters">The parameters.</param>
+        /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <returns>The response.</returns>
         /// <exception cref="HttpRequestException">API exception.</exception>
-        private Task<T> ProcessSyncAsync<T>(ICollection<KeyValuePair<string, string>> parameters)
+        private Task<T> ProcessSyncAsync<T>(ICollection<KeyValuePair<string, string>> parameters, CancellationToken cancellationToken)
         {
-            return ((IAdvancedTodoistClient)this).ProcessPostAsync<T>("sync", parameters);
+            return ProcessPostAsync<T>("sync", parameters, cancellationToken);
         }
 
         /// <summary>
         /// Reads the response asynchronous.
         /// </summary>
         /// <param name="response">The response.</param>
+        /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <exception cref="HttpRequestException">API exception.</exception>
         /// <returns>The response content.</returns>
-        private async Task<string> ReadResponseAsync(HttpResponseMessage response)
+        private async Task<string> ReadResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken)
         {
             var responseContent = await response.Content.ReadAsStringAsync()
                                       .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (!response.IsSuccessStatusCode)
             {
@@ -438,6 +433,11 @@ namespace Todoist.Net
             }
 
             return responseContent;
+        }
+
+        private T DeserializeResponse<T>(string responseContent)
+        {
+            return JsonSerializer.Deserialize<T>(responseContent, _serializerOptions);
         }
 
         /// <summary>
@@ -450,11 +450,10 @@ namespace Todoist.Net
             LinkedList<TodoistException> exceptions = null;
             foreach (var syncStatus in syncResponse.SyncStatus)
             {
-                var dynamicStatus = syncStatus.Value;
-                var type = dynamicStatus.GetType();
+                var result = syncStatus.Value;
 
                 // an "ok" string which signals success of the command
-                if (type == typeof(string) || dynamicStatus.error_code == null)
+                if (result.IsSuccess)
                 {
                     continue;
                 }
@@ -466,22 +465,14 @@ namespace Todoist.Net
 
                 exceptions.AddLast(
                     new TodoistException(
-                        (long)dynamicStatus.error_code,
-                        dynamicStatus.error.ToString(),
-                        dynamicStatus));
+                        result.CommandError.ErrorCode,
+                        result.CommandError.Error,
+                        result.CommandError));
             }
 
             if (exceptions?.Any() == true)
             {
                 throw new AggregateException(exceptions);
-            }
-        }
-
-        private void TryAddToken(ICollection<KeyValuePair<string, string>> parameters)
-        {
-            if (!string.IsNullOrEmpty(_token))
-            {
-                parameters.Add(new KeyValuePair<string, string>("token", _token));
             }
         }
 

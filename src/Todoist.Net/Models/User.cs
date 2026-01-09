@@ -1,33 +1,57 @@
-using Newtonsoft.Json;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Text.Json.Serialization;
 
 namespace Todoist.Net.Models
 {
     /// <summary>
     /// Represents a Todoist user.
     /// </summary>
-    /// <seealso cref="Todoist.Net.Models.UserBase" />
-    public class User : UserBase
+    public class User : ICommandArgument, IUnsettableProperties
     {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="User"/> class.
-        /// </summary>
-        /// <param name="email">The email.</param>
-        /// <param name="fullName">The full name.</param>
-        /// <param name="password">The password.</param>
-        public User(string email, string fullName, string password)
-            : base(email, fullName, password)
-        {
-        }
+        HashSet<PropertyInfo> IUnsettableProperties.UnsetProperties { get; } = new HashSet<PropertyInfo>();
 
-        internal User()
-        {
-        }
+
+        /// <summary>
+        /// Gets or sets the email.
+        /// </summary>
+        /// <value>The email.</value>
+        [JsonPropertyName("email")]
+        public string Email { get; set; }
+
+        /// <summary>
+        /// Gets or sets the full name.
+        /// </summary>
+        /// <value>The full name.</value>
+        [JsonPropertyName("full_name")]
+        public string FullName { get; set; }
+
+        /// <summary>
+        /// Gets or sets the language.
+        /// </summary>
+        /// <value>The language.</value>
+        [JsonPropertyName("lang")]
+        public Language Language { get; set; }
+
+        /// <summary>
+        /// Gets or sets the password.
+        /// </summary>
+        /// <value>The password.</value>
+        [JsonPropertyName("password")]
+        public string Password { get; set; }
+
+        /// <summary>
+        /// Gets or sets the time zone.
+        /// </summary>
+        /// <value>The time zone.</value>
+        [JsonPropertyName("timezone")]
+        public string TimeZone { get; set; }
 
         /// <summary>
         /// Gets or sets the automatic reminder.
         /// </summary>
         /// <value>The automatic reminder.</value>
-        [JsonProperty("auto_reminder")]
+        [JsonPropertyName("auto_reminder")]
         public long? AutoReminder { get; set; }
 
         /// <summary>
@@ -38,56 +62,56 @@ namespace Todoist.Net.Models
         /// <value>
         /// The current password.
         /// </value>
-        [JsonProperty("current_password")]
+        [JsonPropertyName("current_password")]
         public string CurrentPassword { get; set; }
 
         /// <summary>
         /// Gets or sets the date format.
         /// </summary>
         /// <value>The date format.</value>
-        [JsonProperty("date_format")]
+        [JsonPropertyName("date_format")]
         public DateFormat? DateFormat { get; set; }
 
         /// <summary>
         /// Gets or sets the next week.
         /// </summary>
         /// <value>The next week.</value>
-        [JsonProperty("next_week")]
+        [JsonPropertyName("next_week")]
         public DayOfWeek? NextWeek { get; set; }
 
         /// <summary>
         /// Gets or sets the sort order.
         /// </summary>
         /// <value>The sort order.</value>
-        [JsonProperty("sort_order")]
+        [JsonPropertyName("sort_order")]
         public OrderType? SortOrder { get; set; }
 
         /// <summary>
         /// Gets or sets the start day.
         /// </summary>
         /// <value>The start day.</value>
-        [JsonProperty("start_day")]
+        [JsonPropertyName("start_day")]
         public DayOfWeek? StartDay { get; set; }
 
         /// <summary>
         /// Gets or sets the start page.
         /// </summary>
         /// <value>The start page.</value>
-        [JsonProperty("start_page")]
+        [JsonPropertyName("start_page")]
         public string StartPage { get; set; }
 
         /// <summary>
         /// Gets or sets the theme.
         /// </summary>
         /// <value>The theme.</value>
-        [JsonProperty("theme_id")]
+        [JsonPropertyName("theme_id")]
         public string Theme { get; set; }
 
         /// <summary>
         /// Gets or sets the time format.
         /// </summary>
         /// <value>The time format.</value>
-        [JsonProperty("time_format")]
+        [JsonPropertyName("time_format")]
         public TimeFormat? TimeFormat { get; set; }
     }
 }

@@ -1,5 +1,4 @@
 # Todoist.Net
-[![Build status](https://ci.appveyor.com/api/projects/status/r5ylbxtpjya9ayk2?svg=true)](https://ci.appveyor.com/project/olsh/todoist-net)
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=todoist-net&metric=alert_status)](https://sonarcloud.io/dashboard?id=todoist-net)
 [![NuGet](https://img.shields.io/nuget/v/Todoist.Net.svg)](https://www.nuget.org/packages/Todoist.Net/)
 
@@ -15,15 +14,8 @@ Install-Package Todoist.Net
 
 ### Creating Todoist client
 
-With token (preferred way).
 ```csharp
 ITodoistClient client = new TodoistClient("API token");
-```
-
-With email and password.
-```csharp
-ITodoistTokenlessClient tokenlessClient = new TodoistTokenlessClient();
-ITodoistClient client = await tokenlessClient.LoginAsync("email", "password");
 ```
 
 ### Quick add
@@ -69,4 +61,18 @@ await transaction.Notes.AddToItemAsync(new Note("Task description"), taskId);
 // Execute all the requests in the transaction in a single HTTP request.
 await transaction.CommitAsync();
 
+```
+
+### Sending null values when updating entities.
+When updating entities, **Todoist API** only updates properties included in the request body, using a `PATCH` request style.
+That's why all properties with `null` values are not included by default, to allow updating without fetching the entity first,
+since including `null` properties will update them to `null`.
+
+However, if you want to intentionally send a `null` value to the API, you need to use the `Unset` extension method, for example:
+```csharp
+// This code removes a task's due date.
+var task = new UpdateItem("TASK_ID");
+task.Unset(t => t.DueDate);
+
+await client.Items.UpdateAsync(task);
 ```

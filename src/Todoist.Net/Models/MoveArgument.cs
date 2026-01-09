@@ -1,6 +1,5 @@
-﻿using System;
-
-using Newtonsoft.Json;
+using System;
+using System.Text.Json.Serialization;
 
 namespace Todoist.Net.Models
 {
@@ -15,7 +14,7 @@ namespace Todoist.Net.Models
         /// <param name="id">The identifier of moved entity.</param>
         /// <param name="parentId">The parent entity identifier.</param>
         /// <exception cref="T:System.ArgumentException">Entity ID is required for the operation</exception>
-        public MoveArgument(ComplexId id, ComplexId? parentId)
+        public MoveArgument(ComplexId id, ComplexId parentId)
             : base(id)
         {
             if (id.IsEmpty)
@@ -23,16 +22,22 @@ namespace Todoist.Net.Models
                 throw new ArgumentException("Entity ID is required for the move operation", nameof(id));
             }
 
+            if (parentId.IsEmpty)
+            {
+                throw new ArgumentException("Parent ID is required for the move operation", nameof(parentId));
+            }
+
             ParentId = parentId;
         }
 
+        [JsonConstructor]
         internal MoveArgument()
         {
         }
 
         /// <summary>Gets the parent entity identifier.</summary>
         /// <value>The parent entity identifier.</value>
-        [JsonProperty("parent_id")]
-        public ComplexId? ParentId { get; internal set; }
+        [JsonPropertyName("parent_id")]
+        public ComplexId ParentId { get; internal set; }
     }
 }

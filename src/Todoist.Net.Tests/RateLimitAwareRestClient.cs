@@ -3,7 +3,10 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
+
+using Todoist.Net.Models;
 
 using Xunit.Abstractions;
 
@@ -13,17 +16,17 @@ namespace Todoist.Net.Tests
     {
         private readonly ITestOutputHelper _outputHelper;
 
-        private readonly TodoistRestClient restClient;
+        private readonly TodoistRestClient _restClient;
 
-        public RateLimitAwareRestClient(ITestOutputHelper outputHelper)
+        public RateLimitAwareRestClient(string token, ITestOutputHelper outputHelper)
         {
             _outputHelper = outputHelper;
-            restClient = new TodoistRestClient();
+            _restClient = new TodoistRestClient(token);
         }
 
         public void Dispose()
         {
-            restClient?.Dispose();
+            _restClient?.Dispose();
         }
 
         public async Task<HttpResponseMessage> ExecuteRequest(Func<Task<HttpResponseMessage>> request)
@@ -36,7 +39,7 @@ namespace Todoist.Net.Tests
             do
             {
                 result = await request().ConfigureAwait(false);
-                if ((int)result.StatusCode != 429 /*Requests limit*/  && 
+                if ((int)result.StatusCode != 429 /*Requests limit*/  &&
                     (int)result.StatusCode < 500 /*Server side errors happen randomly*/)
                 {
                     return result;
@@ -53,19 +56,29 @@ namespace Todoist.Net.Tests
             return result;
         }
 
+        public async Task<HttpResponseMessage> GetAsync(
+            string resource,
+            IEnumerable<KeyValuePair<string, string>> parameters,
+            CancellationToken cancellationToken = default)
+        {
+            return await ExecuteRequest(() => _restClient.GetAsync(resource, parameters, cancellationToken)).ConfigureAwait(false);
+        }
+
         public async Task<HttpResponseMessage> PostAsync(
             string resource,
-            IEnumerable<KeyValuePair<string, string>> parameters)
+            IEnumerable<KeyValuePair<string, string>> parameters,
+            CancellationToken cancellationToken = default)
         {
-            return await ExecuteRequest(() => restClient.PostAsync(resource, parameters)).ConfigureAwait(false);
+            return await ExecuteRequest(() => _restClient.PostAsync(resource, parameters, cancellationToken)).ConfigureAwait(false);
         }
 
         public async Task<HttpResponseMessage> PostFormAsync(
             string resource,
             IEnumerable<KeyValuePair<string, string>> parameters,
-            IEnumerable<ByteArrayContent> files)
+            IEnumerable<UploadFile> files,
+            CancellationToken cancellationToken = default)
         {
-            return await ExecuteRequest(() => restClient.PostFormAsync(resource, parameters, files))
+            return await ExecuteRequest(() => _restClient.PostFormAsync(resource, parameters, files, cancellationToken))
                        .ConfigureAwait(false);
         }
 
@@ -79,7 +92,7 @@ namespace Todoist.Net.Tests
                     var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     JObject json = JObject.Parse(content);
 
-                    return TimeSpan.FromSeconds(json["error_extra"]["retry_after"].Value<double>());
+                    return TimeSpan.FromSeconds(json["error_extra"]!["retry_after"]!.Value<double>());
                 }
                 catch
                 {

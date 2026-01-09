@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading.Tasks;
 
 using Todoist.Net.Models;
 using Todoist.Net.Tests.Extensions;
@@ -21,42 +22,45 @@ namespace Todoist.Net.Tests.Services
         }
 
         [Fact]
-        public void GetFilterInfo_Success()
+        public async Task GetFilterInfo_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
-            var filters = client.Filters.GetAsync().Result;
+            var filters = (await client.Filters.GetAsync()).ToList();
 
-            Assert.True(filters.Any());
+            Assert.True(filters.Count > 0);
 
-            var result = client.Filters.GetAsync(filters.First().Id).Result;
+            var result = await client.Filters.GetAsync(filters.First().Id);
 
-            Assert.True(result != null);
+            Assert.NotNull(result);
         }
 
         [Fact]
-        public void CreateUpdateDelete_Success()
+        public async Task CreateUpdateDelete_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
             var filter = new Filter(Guid.NewGuid().ToString(), "today");
-            client.Filters.AddAsync(filter).Wait();
+            await client.Filters.AddAsync(filter);
+            try
+            {
+                var filters = await client.Filters.GetAsync();
 
-            var filters = client.Filters.GetAsync().Result;
+                Assert.Contains(filters, f => f.Name == filter.Name);
 
-            Assert.Contains(filters, f => f.Name == filter.Name);
+                filter.Query = "test";
+                await client.Filters.UpdateAsync(filter);
+                var filterOrder = 2;
+                await client.Filters.UpdateOrderAsync(new OrderEntry(filter.Id, filterOrder));
 
-            filter.Query = "test";
-            client.Filters.UpdateAsync(filter)
-                .Wait();
-            var filterOrder = 2;
-            client.Filters.UpdateOrderAsync(new OrderEntry(filter.Id, filterOrder)).Wait();
-
-            var filterInfo = client.Filters.GetAsync(filter.Id).Result;
-            Assert.Equal(filter.Query, filterInfo.Filter.Query);
-            Assert.Equal(filterOrder, filterInfo.Filter.ItemOrder);
-
-            client.Filters.DeleteAsync(filter.Id).Wait();
+                var filterInfo = await client.Filters.GetAsync(filter.Id);
+                Assert.Equal(filter.Query, filterInfo.Filter.Query);
+                Assert.Equal(filterOrder, filterInfo.Filter.ItemOrder);
+            }
+            finally
+            {
+                await client.Filters.DeleteAsync(filter.Id);
+            }
         }
     }
 }

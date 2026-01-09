@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 
 using Todoist.Net.Models;
 using Todoist.Net.Tests.Extensions;
@@ -20,18 +21,29 @@ namespace Todoist.Net.Tests.Services
 
         [Fact]
         [Trait(Constants.TraitName, Constants.IntegrationPremiumTraitValue)]
-        public void GetOrCreateAsyncDisable_NewProject_Success()
+        public async Task GetOrCreateAsyncDisable_NewProject_Success()
         {
             var client = TodoistClientFactory.Create(_outputHelper);
 
-            var projectId = client.Projects.AddAsync(new Project(Guid.NewGuid().ToString())).Result;
-            var emailInfo = client.Emails.GetOrCreateAsync(ObjectType.Project, projectId).Result;
-
-            Assert.NotNull(emailInfo);
-            Assert.NotNull(emailInfo.Email);
-
-            client.Emails.DisableAsync(ObjectType.Project, projectId).Wait();
-            client.Projects.DeleteAsync(projectId).Wait();
+            var project = new Project(Guid.NewGuid().ToString());
+            var projectId = await client.Projects.AddAsync(project);
+            try
+            {
+                var emailInfo = await client.Emails.GetOrCreateAsync(ObjectType.Project, projectId);
+                try
+                {
+                    Assert.NotNull(emailInfo);
+                    Assert.NotNull(emailInfo.Email);
+                }
+                finally
+                {
+                    await client.Emails.DisableAsync(ObjectType.Project, projectId);
+                }
+            }
+            finally
+            {
+                await client.Projects.DeleteAsync(projectId);
+            }
         }
     }
 }

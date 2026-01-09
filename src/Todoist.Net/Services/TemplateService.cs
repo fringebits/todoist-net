@@ -1,5 +1,6 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Todoist.Net.Models;
@@ -15,52 +16,37 @@ namespace Todoist.Net.Services
             _todoistClient = todoistClient;
         }
 
-        /// <summary>
-        /// Gets a template for the project as a file asynchronous.
-        /// </summary>
-        /// <param name="projectId">The project identifier.</param>
-        /// <returns>The CSV template is returned.</returns>
-        /// <exception cref="HttpRequestException">API exception.</exception>
-        public Task<string> ExportAsFileAsync(ComplexId projectId)
+        /// <inheritdoc/>
+        public Task<string> ExportAsFileAsync(ComplexId projectId, CancellationToken cancellationToken = default)
         {
             var parameters = new List<KeyValuePair<string, string>>
                                  {
                                      new KeyValuePair<string, string>("project_id", projectId.ToString())
                                  };
-            return _todoistClient.PostRawAsync("templates/export_as_file", parameters);
+            return _todoistClient.PostRawAsync("templates/export_as_file", parameters, cancellationToken);
         }
 
-        /// <summary>
-        /// Gets a template for the project as a shareable URL asynchronous.
-        /// </summary>
-        /// <param name="projectId">The project identifier.</param>
-        /// <returns>The file object of the template.</returns>
-        /// <exception cref="HttpRequestException">API exception.</exception>
-        public Task<FileBase> ExportAsShareableUrlAsync(ComplexId projectId)
+        /// <inheritdoc/>
+        public Task<FileBase> ExportAsShareableUrlAsync(ComplexId projectId, CancellationToken cancellationToken = default)
         {
             var parameters = new List<KeyValuePair<string, string>>
                                  {
                                      new KeyValuePair<string, string>("project_id", projectId.ToString())
                                  };
-            return _todoistClient.PostAsync<FileBase>("templates/export_as_url", parameters);
+            return _todoistClient.PostAsync<FileBase>("templates/export_as_url", parameters, cancellationToken);
         }
 
-        /// <summary>
-        /// Imports a template into a project asynchronous.
-        /// </summary>
-        /// <param name="projectId">The project identifier.</param>
-        /// <param name="fileContent">Content of the template.</param>
-        /// <returns>Returns <see cref="T:System.Threading.Tasks.Task" />.The task object representing the asynchronous operation.</returns>
-        /// <exception cref="HttpRequestException">API exception.</exception>
-        public Task ImportIntoProjectAsync(ComplexId projectId, byte[] fileContent)
+        /// <inheritdoc/>
+        public Task ImportIntoProjectAsync(ComplexId projectId, byte[] fileContent, CancellationToken cancellationToken = default)
         {
             var parameters = new List<KeyValuePair<string, string>>
                                  {
                                      new KeyValuePair<string, string>("project_id", projectId.ToString())
                                  };
-            var files = new[] { new ByteArrayContent(fileContent) };
+            var file = new UploadFile(fileContent, "template.csv", "text/csv");
+            var files = new[] { file };
 
-            return _todoistClient.PostFormAsync<dynamic>("templates/import_into_project", parameters, files);
+            return _todoistClient.PostFormAsync<dynamic>("templates/import_into_project", parameters, files, cancellationToken);
         }
     }
 }
